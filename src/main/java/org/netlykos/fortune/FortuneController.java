@@ -1,7 +1,5 @@
 package org.netlykos.fortune;
 
-import static org.netlykos.fortune.FortuneManager.NEW_LINE;
-
 import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -11,6 +9,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 public class FortuneController {
+
+  private static final String NEW_LINE = System.getProperty("line.separator");
 
   @Autowired
   FortuneManager fortuneManager;

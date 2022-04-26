@@ -9,6 +9,8 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
@@ -31,11 +33,12 @@ public class FortuneManager {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(FortuneManager.class);
   private static final SecureRandom RANDOM = getSecureRandomInstance();
-
-  public static final String DAT_FILE_SUFFIX = ".dat";
-  public static final int MAX_BUFFER_SIZE = 4096;
-  public static final String NEW_LINE = System.getProperty("line.separator");
-  public static final int FORTUNE_PADDING = 3; // every fortune is padded by '\n%\n'
+  private static final Charset UTF_8 = StandardCharsets.UTF_8;
+  private static final String DAT_FILE_SUFFIX = ".dat";
+  private static final String NEW_LINE = System.getProperty("line.separator");
+  private static final String UNIX_NEW_LINE = "\\n";
+  private static final int MAX_BUFFER_SIZE = 4096;
+  private static final int FORTUNE_PADDING = 3; // every fortune is padded by '\n%\n'
 
   @Value("${org.netlykos.fortune.directory:/fortune}")
   String fortuneDirectory;
@@ -72,22 +75,58 @@ public class FortuneManager {
   }
 
   public List<String> getRandomFortune() {
-    String cookieFile = this.fortunes.get(RANDOM.nextInt(fortuneResources.size()));
-    LOGGER.debug("Returning cookie from {}", cookieFile);
-    FortuneFileRecord structFile = fortuneResources.get(cookieFile);
-    List<Integer> totalRecords = structFile.records();
-    int luckyCookie = RANDOM.nextInt(totalRecords.size());
-    int byteOffsetStart = totalRecords.get(luckyCookie);
+    String category = this.fortunes.get(RANDOM.nextInt(fortuneResources.size()));
+    return getRandomCookieFromCategory(category);
+  }
+
+  public List<String> getFortune(String category) {
+    LOGGER.debug("Looking for cookie in category {}", category);
+    if (!this.fortunes.contains(category)) {
+      throw new IllegalArgumentException(format("No fortunes for category [%s] available.", category));
+    }
+    return getRandomCookieFromCategory(category);
+  }
+
+  public List<String> getFortune(String category, int cookie) {
+    int cookieOffset = cookie - 1;
+    LOGGER.debug("Looking for cookie # {}, offset {} from category {}", cookie, cookieOffset, category);
+    if (!this.fortunes.contains(category)) {
+      throw new IllegalArgumentException(format("Category %s is not setup.", category));
+    }
+    FortuneFileRecord structFile = fortuneResources.get(category);
+    Integer totalRecords = structFile.totalRecords();
+    LOGGER.debug("For category {}, total records {}", category, totalRecords);
+    if (cookieOffset < 0) {
+      throw new IllegalArgumentException("Cookie number should be positive.");
+    }
+    if (cookie > totalRecords) {
+      throw new IllegalArgumentException(format("Category %s only contains %d cookie(s).", category, totalRecords));
+    }
+    return getCookieNumberFromRecord(structFile, cookieOffset);
+  }
+
+  private List<String> getRandomCookieFromCategory(String category) {
+    FortuneFileRecord structFile = fortuneResources.get(category);
+    int totalRecords = structFile.totalRecords();
+    int luckyCookie = RANDOM.nextInt(totalRecords);
+    LOGGER.debug("Selected cookie {} from {} for category {}.", luckyCookie, totalRecords, category);
+    return getCookieNumberFromRecord(structFile, luckyCookie);
+  }
+
+  private List<String> getCookieNumberFromRecord(FortuneFileRecord structFile, int cookie) {
+    List<Integer> records = structFile.records();
+    int byteOffsetStart = records.get(cookie);
     // if we are reading the last record from the data file then read till the end of the file, else read till the next cookie
     int byteOffsetEnd = structFile.fileContent().capacity();
-    if (luckyCookie < totalRecords.size()) {
-      byteOffsetEnd = totalRecords.get(luckyCookie + 1);
+    if (cookie < records.size()) {
+      byteOffsetEnd = records.get(cookie + 1);
     }
+    // remove the FORTUNE_PADDING length from the bytes to read
     int totalLength = byteOffsetEnd - byteOffsetStart - FORTUNE_PADDING;
-    LOGGER.debug("Lucky cookie {} from {}, reading {} byte(s) from byte offset {} to {}",
-        luckyCookie, totalRecords.size(), totalLength, byteOffsetStart, byteOffsetEnd);
+    LOGGER.debug("Cookie {} of {}, reading {} byte(s) from byte offset {} to {}",
+        cookie, records.size(), totalLength, byteOffsetStart, byteOffsetEnd);
     byte[] byteCookie = structFile.getFileContent(byteOffsetStart, totalLength);
-    return Arrays.asList(new String(byteCookie).split(NEW_LINE));
+    return Arrays.asList(new String(byteCookie, UTF_8).split(UNIX_NEW_LINE));
   }
 
   static byte[] getResourceContent(String resourcePath) throws IOException {
